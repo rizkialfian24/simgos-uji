@@ -18,5 +18,28 @@ echo "dev $(hostname) $(date +%F)" | sudo tee /etc/simgos-dev
 ## Isi
 | Folder | Isi |
 |---|---|
-| `kunjungan/` | pembuat & pembatal kunjungan uji (sedang disusun) |
+| `kunjungan/` | pembuat & pembatal 5 kunjungan uji KlaimTTE |
 | `skrip/` | penjaga server dev, pemeriksa rahasia, hook pre-commit |
+
+## 5 kunjungan uji KlaimTTE
+
+```bash
+bash kunjungan/buat-kunjungan-uji.sh --cek    # jalankan semua langkah lalu ROLLBACK (aman, tidak menyimpan)
+bash kunjungan/buat-kunjungan-uji.sh          # buat sungguhan (ketik YA)
+bash kunjungan/batalkan-kunjungan-uji.sh --cek
+bash kunjungan/batalkan-kunjungan-uji.sh      # batalkan semua pendaftaran pasien uji
+```
+
+| No | Jenis | Ruangan | DPJP | ICD-10 |
+|---|---|---|---|---|
+| 1 | Rawat jalan | Poli Penyakit Dalam | dokter011 | I10 |
+| 2 | Rawat jalan | Poli Bedah | dokter030 | K35.8 |
+| 3 | Rawat jalan | Poli Anak | dokter017 | J06.9 |
+| 4 | IGD | IGD | dokter037 | A09 |
+| 5 | IGD → rawat inap (masih dirawat) | IGD → RI Penyakit Dalam Kelas III | dokter037 → dokter011 | J18.9 |
+
+Semua BPJS (penjamin 2, peserta 21) dengan SEP dummy `9999R…`. Yang diisi: pasien + KTP + kartu BPJS, pendaftaran,
+tujuan, penjamin, kunjungan (diterima), anamnesis, keluhan utama, diagnosa utama; mutasi + tempat tidur untuk no. 5.
+Tagihan, karcis, antrian, kelengkapan berkas klaim, akomodasi: dibuat trigger SIMGOS seperti pendaftaran biasa.
+Koneksi: `~/.my.cnf` bila ada, selain itu `-u akun` + password. Rincian hasil: `hasil/` (tidak masuk Git).
+Belum diisi: resume medis (banyak tabel turunan) — dokumen resume belum muncul untuk pasien uji.
