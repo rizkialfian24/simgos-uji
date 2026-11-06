@@ -41,5 +41,8 @@ bash kunjungan/batalkan-kunjungan-uji.sh      # batalkan semua pendaftaran pasie
 Semua BPJS (penjamin 2, peserta 21) dengan SEP dummy `9999R…`. Yang diisi: pasien + KTP + kartu BPJS, pendaftaran,
 tujuan, penjamin, kunjungan (diterima), anamnesis, keluhan utama, diagnosa utama; mutasi + tempat tidur untuk no. 5.
 Tagihan, karcis, antrian, kelengkapan berkas klaim, akomodasi: dibuat trigger SIMGOS seperti pendaftaran biasa.
+Ruangan & dokter: pilihan di vbox dipakai bila valid; di server lain dipilih **otomatis** (ruangan menurut jenis
+& nama, dokter siap TTE: akun aktif + NIK KTP 16 digit + terdaftar di ruangan; rawat inap: ada tempat tidur kosong).
+Pilihan dicetak di awal (`pilihan`/`otomatis`). Lihat pilihan otomatis di vbox: `KT_ABAIKAN_PILIHAN=1 bash kunjungan/buat-kunjungan-uji.sh --cek`.
 Koneksi: `~/.my.cnf` bila ada, selain itu `-u akun` + password. Rincian hasil: `hasil/` (tidak masuk Git).
 Belum diisi: resume medis (banyak tabel turunan) — dokumen resume belum muncul untuk pasien uji.

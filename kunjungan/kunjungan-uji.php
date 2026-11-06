@@ -21,17 +21,18 @@ function info(string $m): void { echo $m, "\n"; }
 
 // ---------------------------------------------------------------- data uji (penanda: nama UJI KLAIMTTE, nomor 9999…)
 const PENANDA = 'UJI KLAIMTTE';
+// 'cari' = kata kunci nama ruangan (urut prioritas); 'pilih' = ruangan & dokter pilihan (dipakai bila valid di server ini).
 $RENCANA = [
-    1 => ['jk' => 1, 'lahir' => '1968-04-12', 'jenis' => 'rj', 'ruangan' => '101010106', 'dokter' => 18, 'kelas' => 3, 'icd' => 'I10',
+    1 => ['jk' => 1, 'lahir' => '1968-04-12', 'jenis' => 'rj', 'cari' => ['Penyakit Dalam', 'Interna', 'Dalam'], 'pilih' => ['101010106', 18], 'kelas' => 3, 'icd' => 'I10',
           'keluhan' => 'Pusing dan tengkuk terasa berat sejak 3 hari', 'rps' => 'Tekanan darah tinggi tidak terkontrol, obat habis 1 minggu'],
-    2 => ['jk' => 2, 'lahir' => '1990-09-03', 'jenis' => 'rj', 'ruangan' => '101010102', 'dokter' => 22, 'kelas' => 3, 'icd' => 'K35.8',
+    2 => ['jk' => 2, 'lahir' => '1990-09-03', 'jenis' => 'rj', 'cari' => ['Bedah Umum', 'Bedah'], 'pilih' => ['101010102', 22], 'kelas' => 3, 'icd' => 'K35.8',
           'keluhan' => 'Nyeri perut kanan bawah sejak 2 hari', 'rps' => 'Nyeri bertambah saat berjalan, mual, demam ringan'],
-    3 => ['jk' => 1, 'lahir' => '2019-02-21', 'jenis' => 'rj', 'ruangan' => '101010101', 'dokter' => 27, 'kelas' => 3, 'icd' => 'J06.9',
+    3 => ['jk' => 1, 'lahir' => '2019-02-21', 'jenis' => 'rj', 'cari' => ['Anak'], 'pilih' => ['101010101', 27], 'kelas' => 3, 'icd' => 'J06.9',
           'keluhan' => 'Batuk pilek dan demam sejak 3 hari', 'rps' => 'Demam naik turun, nafsu makan menurun'],
-    4 => ['jk' => 2, 'lahir' => '1985-12-30', 'jenis' => 'igd', 'ruangan' => '101020201', 'dokter' => 9, 'kelas' => 3, 'icd' => 'A09',
+    4 => ['jk' => 2, 'lahir' => '1985-12-30', 'jenis' => 'igd', 'cari' => ['IGD', 'Gawat Darurat', 'Darurat'], 'pilih' => ['101020201', 9], 'kelas' => 3, 'icd' => 'A09',
           'keluhan' => 'BAB cair lebih dari 6 kali sejak pagi', 'rps' => 'Disertai muntah dan lemas'],
-    5 => ['jk' => 1, 'lahir' => '1957-07-17', 'jenis' => 'ri', 'ruangan' => '101020201', 'dokter' => 9, 'kelas' => 1, 'icd' => 'J18.9',
-          'ri_ruangan' => '101030401', 'ri_dokter' => 18,
+    5 => ['jk' => 1, 'lahir' => '1957-07-17', 'jenis' => 'ri', 'cari' => ['IGD', 'Gawat Darurat', 'Darurat'], 'pilih' => ['101020201', 9], 'kelas' => 1, 'icd' => 'J18.9',
+          'ri_cari' => ['Penyakit Dalam', 'Interna', 'Dalam'], 'ri_pilih' => ['101030401', 18],
           'keluhan' => 'Sesak napas dan batuk berdahak sejak 4 hari', 'rps' => 'Demam tinggi, sesak bertambah, saturasi turun'],
 ];
 const JK_RUANGAN = ['rj' => 1, 'igd' => 2, 'ri' => 3];
@@ -88,27 +89,59 @@ if ($MODE === 'batal' || $MODE === 'batal-cek') {
     exit(0);
 }
 
-// =====================================================================================================  PEMERIKSAAN AWAL
+// =====================================================================================================  RUANGAN & DOKTER
+// Dokter "siap": aktif, tepat satu akun SIMGOS aktif ber-NIP sama, NIP tunggal di master.pegawai, tepat satu NIK KTP
+// 16 digit di pegawai.kartu_identitas (syarat penanda tangan KlaimTTE), punya SMF, terdaftar aktif di ruangan itu.
+const SQL_DOKTER_SIAP = "FROM master.dokter d JOIN master.dokter_ruangan dr ON dr.DOKTER = d.ID AND dr.STATUS = 1 AND dr.RUANGAN = ?
+    WHERE d.STATUS = 1
+      AND (SELECT COUNT(*) FROM aplikasi.pengguna u WHERE u.NIP = d.NIP AND u.STATUS = 1) = 1
+      AND (SELECT COUNT(*) FROM master.pegawai p WHERE p.NIP = d.NIP) = 1
+      AND (SELECT COUNT(*) FROM pegawai.kartu_identitas k WHERE k.NIP = d.NIP AND k.JENIS = 1 AND k.NOMOR REGEXP '^[0-9]{16}$') = 1
+      AND EXISTS (SELECT 1 FROM master.dokter_smf s WHERE s.DOKTER = d.ID AND s.STATUS = 1)";
+function ruanganAktif(string $id, int $jk): bool { return (bool) satu("SELECT 1 FROM master.ruangan WHERE ID = ? AND STATUS = 1 AND JENIS_KUNJUNGAN = ?", [$id, $jk]); }
+function adaTempatTidur(string $ru): bool {
+    return (bool) satu("SELECT 1 FROM master.ruang_kamar rk JOIN master.ruang_kamar_tidur t ON t.RUANG_KAMAR = rk.ID WHERE rk.RUANGAN = ? AND rk.STATUS = 1 AND t.STATUS = 1 LIMIT 1", [$ru]);
+}
+/** @return array{0:string,1:int,2:string} ruangan, dokter, asal ('pilihan' | 'otomatis') */
+function tentukan(int $jk, array $cari, array $pilih, bool $butuhTT): ?array {
+    [$pr, $pd] = getenv('KT_ABAIKAN_PILIHAN') === '1' ? ['', 0] : $pilih;   // uji: paksa pemilihan otomatis
+    if (ruanganAktif($pr, $jk) && (!$butuhTT || adaTempatTidur($pr)) && satu("SELECT 1 " . SQL_DOKTER_SIAP . " AND d.ID = ?", [$pr, $pd])) {
+        return [$pr, $pd, 'pilihan'];
+    }
+    $urut = []; $par = [];
+    foreach ($cari as $n => $kata) { $urut[] = "WHEN r.DESKRIPSI LIKE ? THEN $n"; $par[] = '%' . $kata . '%'; }
+    $rows = q("SELECT r.ID FROM master.ruangan r WHERE r.STATUS = 1 AND r.JENIS_KUNJUNGAN = ?
+        ORDER BY CASE " . implode(' ', $urut) . " ELSE 99 END, CHAR_LENGTH(r.DESKRIPSI), r.ID", array_merge([$jk], $par))->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($rows as $ru) {
+        if ($butuhTT && !adaTempatTidur($ru)) { continue; }
+        $dk = satu("SELECT d.ID " . SQL_DOKTER_SIAP . " ORDER BY (SELECT COUNT(*) FROM pendaftaran.kunjungan k WHERE k.DPJP = d.ID AND k.RUANGAN = dr.RUANGAN) DESC, d.ID LIMIT 1", [$ru]);
+        if ($dk) { return [(string) $ru, (int) $dk, 'otomatis']; }
+    }
+    return null;
+}
+
 $masalah = [];
 $dokterUser = [];
-foreach ($RENCANA as $i => $r) {
-    $pairs = [[$r['ruangan'], $r['dokter'], $r['jenis'] === 'ri' ? 2 : JK_RUANGAN[$r['jenis']]]];
-    if ($r['jenis'] === 'ri') { $pairs[] = [$r['ri_ruangan'], $r['ri_dokter'], 3]; }
-    foreach ($pairs as [$ru, $dk, $jk]) {
-        $row = q("SELECT DESKRIPSI, JENIS_KUNJUNGAN FROM master.ruangan WHERE ID = ? AND STATUS = 1", [$ru])->fetch();
-        if (!$row) { $masalah[] = "kunjungan $i: ruangan $ru tidak ada/nonaktif"; continue; }
-        if ((int) $row['JENIS_KUNJUNGAN'] !== $jk) { $masalah[] = "kunjungan $i: ruangan $ru bukan jenis kunjungan $jk"; }
-        if (!satu("SELECT 1 FROM master.dokter_ruangan WHERE DOKTER = ? AND RUANGAN = ? AND STATUS = 1", [$dk, $ru])) { $masalah[] = "kunjungan $i: dokter $dk tidak terdaftar di ruangan $ru"; }
-        $u = q("SELECT u.ID, u.LOGIN FROM master.dokter d JOIN aplikasi.pengguna u ON u.NIP = d.NIP AND u.STATUS = 1 WHERE d.ID = ? AND d.STATUS = 1", [$dk])->fetchAll();
-        if (count($u) !== 1) { $masalah[] = "kunjungan $i: dokter $dk tidak punya tepat satu akun SIMGOS aktif"; } else { $dokterUser[$dk] = (int) $u[0]['ID']; }
-        if (!satu("SELECT SMF FROM master.dokter_smf WHERE DOKTER = ? AND STATUS = 1 LIMIT 1", [$dk])) { $masalah[] = "kunjungan $i: SMF dokter $dk tidak ada"; }
+info('Rencana di server ' . gethostname() . ':');
+foreach ($RENCANA as $i => &$r) {
+    $t = tentukan(JK_RUANGAN[$r['jenis'] === 'ri' ? 'igd' : $r['jenis']], $r['cari'], $r['pilih'], false);
+    if ($t === null) { $masalah[] = "kunjungan $i: tidak ada ruangan jenis " . ($r['jenis'] === 'rj' ? 'rawat jalan' : 'IGD') . " dengan dokter siap TTE"; continue; }
+    [$r['ruangan'], $r['dokter'], $asal] = $t;
+    $ket = sprintf('  %d %-6s %-28s dokter %-4d (%s)', $i, strtoupper($r['jenis']), (string) satu("SELECT DESKRIPSI FROM master.ruangan WHERE ID = ?", [$r['ruangan']]), $r['dokter'], $asal);
+    if ($r['jenis'] === 'ri') {
+        $t2 = tentukan(3, $r['ri_cari'], $r['ri_pilih'], true);
+        if ($t2 === null) { $masalah[] = "kunjungan $i: tidak ada ruang rawat inap dengan tempat tidur kosong & dokter siap TTE"; continue; }
+        [$r['ri_ruangan'], $r['ri_dokter'], $asal2] = $t2;
+        $ket .= sprintf(' -> %s dokter %d (%s)', (string) satu("SELECT DESKRIPSI FROM master.ruangan WHERE ID = ?", [$r['ri_ruangan']]), $r['ri_dokter'], $asal2);
+    }
+    info($ket);
+    foreach (array_filter([$r['dokter'], $r['ri_dokter'] ?? null]) as $dk) {
+        $dokterUser[$dk] = (int) satu("SELECT u.ID FROM master.dokter d JOIN aplikasi.pengguna u ON u.NIP = d.NIP AND u.STATUS = 1 WHERE d.ID = ?", [$dk]);
     }
     if (!satu("SELECT 1 FROM master.mrconso WHERE SAB = 'ICD10_1998' AND CODE = ? LIMIT 1", [$r['icd']])) { $masalah[] = "kunjungan $i: kode ICD-10 {$r['icd']} tidak ada"; }
-    if ($r['jenis'] === 'ri' && !satu("SELECT 1 FROM master.ruang_kamar rk JOIN master.ruang_kamar_tidur t ON t.RUANG_KAMAR = rk.ID WHERE rk.RUANGAN = ? AND rk.STATUS = 1 AND t.STATUS = 1 LIMIT 1", [$r['ri_ruangan']])) {
-        $masalah[] = "kunjungan $i: tidak ada tempat tidur kosong di ruangan {$r['ri_ruangan']}";
-    }
 }
-if ($masalah) { berhenti("data master server ini tidak cocok dengan rencana:\n  - " . implode("\n  - ", $masalah) . "\n  Tidak ada yang diubah."); }
+unset($r);
+if ($masalah) { berhenti("data master server ini belum memenuhi:\n  - " . implode("\n  - ", $masalah) . "\n  Tidak ada yang diubah."); }
 
 // =====================================================================================================  BUAT
 $ringkasan = [];
@@ -189,6 +222,12 @@ try {
             $baris['ruangan'] .= ' -> ' . (string) satu("SELECT DESKRIPSI FROM master.ruangan WHERE ID = ?", [$r['ri_ruangan']])
                 . ' (TT ' . (string) satu("SELECT TEMPAT_TIDUR FROM master.ruang_kamar_tidur WHERE ID = ?", [$bed]) . ')';
             $baris['dpjp'] .= ' -> ' . (string) satu("SELECT LOGIN FROM aplikasi.pengguna WHERE ID = ?", [$dokterUser[$r['ri_dokter']]]);
+            $v = q("SELECT (SELECT KELUAR FROM pendaftaran.kunjungan WHERE NOMOR = ?) igd_keluar, (SELECT STATUS FROM pendaftaran.mutasi WHERE NOMOR = ?) mutasi_st,
+                           (SELECT STATUS FROM master.ruang_kamar_tidur WHERE ID = ?) tt_st", [$kunjPertama, $mutasi, $bed])->fetch();
+            if ($v['igd_keluar'] === null || (int) $v['mutasi_st'] !== 2) {
+                throw new RuntimeException('trigger server ini tidak menutup kunjungan IGD / menyelesaikan mutasi seperti SIMGOS acuan (keluar='
+                    . var_export($v['igd_keluar'], true) . ', mutasi=' . $v['mutasi_st'] . ')');
+            }
             $baris['status'] = 'masih dirawat';
         } else {
             q("UPDATE pendaftaran.kunjungan SET KELUAR = ?, STATUS = 2 WHERE NOMOR = ?", [$tgl($mulai - 55), $kunjPertama]);
