@@ -14,6 +14,7 @@ declare(strict_types=1);
 $cfg = json_decode((string) stream_get_contents(STDIN), true);
 if (!is_array($cfg)) { fwrite(STDERR, "konfigurasi tidak valid\n"); exit(2); }
 $MODE = $cfg['mode'];                         // cek | buat | batal-cek | batal
+$PAKAI_TT = !empty($cfg['tempat_tidur']);     // bawaan: rawat inap TANPA tempat tidur (status master.ruang_kamar_tidur tidak disentuh)
 $HASIL = $cfg['hasil'] ?? '';
 
 function berhenti(string $m, int $kode = 1): never { fwrite(STDERR, "BERHENTI: $m\n"); exit($kode); }
@@ -129,8 +130,8 @@ foreach ($RENCANA as $i => &$r) {
     [$r['ruangan'], $r['dokter'], $asal] = $t;
     $ket = sprintf('  %d %-6s %-28s dokter %-4d (%s)', $i, strtoupper($r['jenis']), (string) satu("SELECT DESKRIPSI FROM master.ruangan WHERE ID = ?", [$r['ruangan']]), $r['dokter'], $asal);
     if ($r['jenis'] === 'ri') {
-        $t2 = tentukan(3, $r['ri_cari'], $r['ri_pilih'], true);
-        if ($t2 === null) { $masalah[] = "kunjungan $i: tidak ada ruang rawat inap dengan tempat tidur kosong & dokter siap TTE"; continue; }
+        $t2 = tentukan(3, $r['ri_cari'], $r['ri_pilih'], $PAKAI_TT);
+        if ($t2 === null) { $masalah[] = "kunjungan $i: tidak ada ruang rawat inap" . ($PAKAI_TT ? ' dengan tempat tidur kosong' : '') . " & dokter siap TTE"; continue; }
         [$r['ri_ruangan'], $r['ri_dokter'], $asal2] = $t2;
         $ket .= sprintf(' -> %s dokter %d (%s)', (string) satu("SELECT DESKRIPSI FROM master.ruangan WHERE ID = ?", [$r['ri_ruangan']]), $r['ri_dokter'], $asal2);
     }
@@ -143,10 +144,30 @@ foreach ($RENCANA as $i => &$r) {
 unset($r);
 if ($masalah) { berhenti("data master server ini belum memenuhi:\n  - " . implode("\n  - ", $masalah) . "\n  Tidak ada yang diubah."); }
 
+// =====================================================================================================  PENGAMAN DATA MASTER
+// Skrip hanya MENAMBAH pasien & kunjungan. Sidik jari tabel master dihitung di dalam transaksi sebelum & sesudah;
+// bila ada satu baris berubah (termasuk oleh trigger SIMGOS), semuanya di-ROLLBACK.
+function tabelMaster(): array {
+    return q("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'master' AND TABLE_TYPE = 'BASE TABLE'
+        AND (TABLE_NAME LIKE 'tarif%' OR TABLE_NAME IN ('ruangan','ruang_kamar','ruang_kamar_tidur','dokter','dokter_ruangan','dokter_smf',
+             'pegawai','perawat','referensi','paket','ppk','smf_ruangan')) ORDER BY TABLE_NAME")->fetchAll(PDO::FETCH_COLUMN);
+}
+function sidikMaster(array $tabel): array {
+    $out = [];
+    foreach ($tabel as $t) {
+        $cols = q("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'master' AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION", [$t])->fetchAll(PDO::FETCH_COLUMN);
+        $expr = implode(', ', array_map(fn($c) => "IFNULL(CAST(`" . str_replace('`', '', $c) . "` AS CHAR),'~')", $cols));
+        $out[$t] = implode(':', q("SELECT COUNT(*), IFNULL(BIT_XOR(CRC32(CONCAT_WS('|', $expr))),0) FROM master.`" . str_replace('`', '', $t) . "`")->fetch(PDO::FETCH_NUM));
+    }
+    return $out;
+}
+
 // =====================================================================================================  BUAT
 $ringkasan = [];
 $db->beginTransaction();
 try {
+    $TABEL_MASTER = tabelMaster();
+    $sidikAwal = sidikMaster($TABEL_MASTER);
     $now = new DateTimeImmutable((string) satu("SELECT NOW()"));
     $tgl = fn(int $menitLalu): string => $now->modify("-$menitLalu minutes")->format('Y-m-d H:i:s');
 
@@ -213,17 +234,17 @@ try {
             $mutasi = (string) satu("SELECT generator.generateNoMutasi(?, DATE(NOW()))", [$r['ruangan']]);
             q("INSERT INTO pendaftaran.mutasi (NOMOR, KUNJUNGAN, TANGGAL, TUJUAN, DPJP, OLEH, STATUS) VALUES (?, ?, ?, ?, ?, ?, 1)",
               [$mutasi, $kunjPertama, $tgl($mulai - 60), $r['ri_ruangan'], $r['ri_dokter'], $OLEH]);
-            $bed = (int) satu("SELECT t.ID FROM master.ruang_kamar rk JOIN master.ruang_kamar_tidur t ON t.RUANG_KAMAR = rk.ID
-                WHERE rk.RUANGAN = ? AND rk.STATUS = 1 AND t.STATUS = 1 ORDER BY t.ID LIMIT 1 FOR UPDATE", [$r['ri_ruangan']]);
+            $bed = $PAKAI_TT ? (int) satu("SELECT t.ID FROM master.ruang_kamar rk JOIN master.ruang_kamar_tidur t ON t.RUANG_KAMAR = rk.ID
+                WHERE rk.RUANGAN = ? AND rk.STATUS = 1 AND t.STATUS = 1 ORDER BY t.ID LIMIT 1 FOR UPDATE", [$r['ri_ruangan']]) : null;
             $kunjRi = $terima($r['ri_ruangan'], $r['ri_dokter'], $tgl($mulai - 75), $mutasi, $bed);
             q("UPDATE pendaftaran.kunjungan SET STATUS = 2 WHERE NOMOR = ?", [$kunjPertama]);   // trigger: KELUAR = masuk RI - 1 detik
             $rekam($kunjRi, $dokterUser[$r['ri_dokter']], true);
             $baris['kunjungan'][] = $kunjRi;
             $baris['ruangan'] .= ' -> ' . (string) satu("SELECT DESKRIPSI FROM master.ruangan WHERE ID = ?", [$r['ri_ruangan']])
-                . ' (TT ' . (string) satu("SELECT TEMPAT_TIDUR FROM master.ruang_kamar_tidur WHERE ID = ?", [$bed]) . ')';
+                . ($bed ? ' (TT ' . (string) satu("SELECT TEMPAT_TIDUR FROM master.ruang_kamar_tidur WHERE ID = ?", [$bed]) . ')' : ' (tanpa TT)');
             $baris['dpjp'] .= ' -> ' . (string) satu("SELECT LOGIN FROM aplikasi.pengguna WHERE ID = ?", [$dokterUser[$r['ri_dokter']]]);
-            $v = q("SELECT (SELECT KELUAR FROM pendaftaran.kunjungan WHERE NOMOR = ?) igd_keluar, (SELECT STATUS FROM pendaftaran.mutasi WHERE NOMOR = ?) mutasi_st,
-                           (SELECT STATUS FROM master.ruang_kamar_tidur WHERE ID = ?) tt_st", [$kunjPertama, $mutasi, $bed])->fetch();
+            $v = q("SELECT (SELECT KELUAR FROM pendaftaran.kunjungan WHERE NOMOR = ?) igd_keluar, (SELECT STATUS FROM pendaftaran.mutasi WHERE NOMOR = ?) mutasi_st",
+                   [$kunjPertama, $mutasi])->fetch();
             if ($v['igd_keluar'] === null || (int) $v['mutasi_st'] !== 2) {
                 throw new RuntimeException('trigger server ini tidak menutup kunjungan IGD / menyelesaikan mutasi seperti SIMGOS acuan (keluar='
                     . var_export($v['igd_keluar'], true) . ', mutasi=' . $v['mutasi_st'] . ')');
@@ -243,6 +264,12 @@ try {
         $ringkasan[] = $baris;
     }
 
+    $sidikAkhir = sidikMaster($TABEL_MASTER);
+    $berubah = array_keys(array_diff_assoc($sidikAkhir, $sidikAwal));
+    if ($PAKAI_TT && getenv('KT_UJI_KETAT') !== '1') { $berubah = array_values(array_diff($berubah, ['ruang_kamar_tidur'])); }   // diizinkan hanya dengan --dengan-tempat-tidur
+    if ($berubah) { throw new RuntimeException('data master berubah (' . implode(', ', $berubah) . '); dibatalkan agar data master tetap utuh'); }
+    $ringkasanMaster = count($TABEL_MASTER) . ' tabel master diperiksa (' . implode(', ', $TABEL_MASTER) . '): tidak ada yang berubah'
+        . ($PAKAI_TT ? ' selain status tempat tidur' : '');
     if ($MODE === 'cek') { $db->rollBack(); } else { $db->commit(); }
 } catch (Throwable $e) {
     if ($db->inTransaction()) { $db->rollBack(); }
@@ -260,6 +287,7 @@ foreach ($ringkasan as $b) {
 info('');
 info('Tagihan terbentuk (trigger): ' . implode(' ', array_column($ringkasan, 'tagihan')) . '   kelengkapan berkas klaim: ' . implode(' ', array_column($ringkasan, 'kelengkapan_klaim')));
 info('Petugas pendaftaran (OLEH): ' . $olehLogin . " (ID $OLEH)");
+info('Data master: ' . $ringkasanMaster);
 if ($MODE === 'cek') {
     info('MODE CEK: semua langkah berhasil dijalankan lalu DIBATALKAN (ROLLBACK). Tidak ada data yang tersimpan.');
 } elseif ($HASIL !== '') {

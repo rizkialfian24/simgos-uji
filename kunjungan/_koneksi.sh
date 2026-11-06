@@ -29,9 +29,9 @@ siapkan_koneksi() {
   DSN="mysql:host=127.0.0.1;charset=utf8mb4"
 }
 # JSON aman untuk STDIN php (nilai di-escape oleh php sendiri).
-jalankan_php() {   # $1 mode, $2 oleh, $3 berkas hasil
-  printf '%s\0%s\0%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$DSN" "$DBUSER" "$DBPASS" | php -r '
-    [$m,$o,$h,$d,$u,$p] = array_pad(explode("\0", stream_get_contents(STDIN)), 6, "");
-    echo json_encode(["mode"=>$m,"oleh"=>$o,"hasil"=>$h,"dsn"=>$d,"user"=>$u,"pass"=>$p]);' \
+jalankan_php() {   # $1 mode, $2 oleh, $3 berkas hasil, $4 pakai tempat tidur (0/1)
+  printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$DSN" "$DBUSER" "$DBPASS" "${4:-0}" | php -r '
+    [$m,$o,$h,$d,$u,$p,$t] = array_pad(explode("\0", stream_get_contents(STDIN)), 7, "");
+    echo json_encode(["mode"=>$m,"oleh"=>$o,"hasil"=>$h,"dsn"=>$d,"user"=>$u,"pass"=>$p,"tempat_tidur"=>$t==="1"]);' \
   | php -d display_errors=stderr "$HERE/kunjungan-uji.php"
 }

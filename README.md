@@ -36,10 +36,15 @@ bash kunjungan/batalkan-kunjungan-uji.sh      # batalkan semua pendaftaran pasie
 | 2 | Rawat jalan | Poli Bedah | dokter030 | K35.8 |
 | 3 | Rawat jalan | Poli Anak | dokter017 | J06.9 |
 | 4 | IGD | IGD | dokter037 | A09 |
-| 5 | IGD → rawat inap (masih dirawat) | IGD → RI Penyakit Dalam Kelas III | dokter037 → dokter011 | J18.9 |
+| 5 | IGD → rawat inap (masih dirawat, tanpa tempat tidur) | IGD → RI Penyakit Dalam Kelas III | dokter037 → dokter011 | J18.9 |
+
+**Hanya menambah pasien & kunjungan.** Ruangan, tarif, dokter, tempat tidur: memakai yang sudah ada dan TIDAK diubah.
+Pengaman: sidik jari 17 tabel master (ruangan, kamar, tempat tidur, dokter, SMF, pegawai, perawat, referensi, paket, ppk,
+semua `tarif*`) dihitung sebelum & sesudah di dalam transaksi; bila ada yang berubah (termasuk oleh trigger) semuanya
+di-ROLLBACK. Rawat inap bawaan TANPA tempat tidur; `--dengan-tempat-tidur` bila status tempat tidur boleh berubah.
 
 Semua BPJS (penjamin 2, peserta 21) dengan SEP dummy `9999R…`. Yang diisi: pasien + KTP + kartu BPJS, pendaftaran,
-tujuan, penjamin, kunjungan (diterima), anamnesis, keluhan utama, diagnosa utama; mutasi + tempat tidur untuk no. 5.
+tujuan, penjamin, kunjungan (diterima), anamnesis, keluhan utama, diagnosa utama; mutasi IGD -> rawat inap untuk no. 5.
 Tagihan, karcis, antrian, kelengkapan berkas klaim, akomodasi: dibuat trigger SIMGOS seperti pendaftaran biasa.
 Ruangan & dokter: pilihan di vbox dipakai bila valid; di server lain dipilih **otomatis** (ruangan menurut jenis
 & nama, dokter siap TTE: akun aktif + NIK KTP 16 digit + terdaftar di ruangan; rawat inap: ada tempat tidur kosong).
