@@ -1,0 +1,3 @@
+* -text
+*.php diff=php
+*.sh diff=bash

@@ -1,0 +1,10 @@
+# rahasia & hasil per server — tidak pernah masuk Git
+*.env
+!*.env.example
+.my.cnf
+*.my.cnf
+*.pem
+*.key
+*.log
+hasil/
+__pycache__/

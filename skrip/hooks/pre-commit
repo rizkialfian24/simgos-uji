@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Dipasang oleh siapkan-repo.sh (git config core.hooksPath skrip/hooks): tolak commit yang memuat rahasia.
+exec bash "$(git rev-parse --show-toplevel)/skrip/cek-rahasia.sh" --staged
