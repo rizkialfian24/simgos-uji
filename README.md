@@ -19,7 +19,7 @@ echo "dev $(hostname) $(date +%F)" | sudo tee /etc/simgos-dev
 | Folder | Isi |
 |---|---|
 | `kunjungan/` | pembuat & pembatal 5 kunjungan uji KlaimTTE |
-| `template-qr/` | QR TTE bawaan pada template RS berisi teks INFO_DOC (seperti template acuan SIMGOS) |
+| `template-qr/` | QR TTE bawaan (versi dev). **Untuk produksi pakai `klaimtte/alat-simgos/template-qr/`** (tanpa penjaga server dev) |
 | `skrip/` | penjaga server dev, pemeriksa rahasia, hook pre-commit |
 
 ## 5 kunjungan uji KlaimTTE
