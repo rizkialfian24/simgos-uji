@@ -33,7 +33,7 @@ echo "simgos-uji — QR INFO_DOC pada template RS ($([[ $MODE == cek ]] && echo 
 read -r -s -p "Password MySQL untuk akun '$AKUN' (hanya membaca): " PW; echo
 CNF=$(mktemp); chmod 600 "$CNF"; trap 'rm -f "$CNF"' EXIT
 printf '[client]\nuser=%s\npassword="%s"\n' "$AKUN" "${PW//\"/\\\"}" > "$CNF"; unset PW
-M=(mysql --defaults-extra-file="$CNF" -N -B)
+M=(mysql --defaults-file="$CNF" -N -B)   # eksklusif: ~/.my.cnf (mis. akun root lama) tidak ikut terbaca
 if [[ -z $KODE ]]; then KODE=$("${M[@]}" -e "SELECT p.KODE FROM aplikasi.instansi i JOIN master.ppk p ON p.ID=i.PPK LIMIT 1"); fi
 [[ $KODE =~ ^[0-9]{5,}$ ]] || { echo "Kode PPK instansi tidak terbaca: '$KODE' (pakai --kode)"; exit 1; }
 [[ $KODE != "$ACUAN" ]] || { echo 'Kode RS sama dengan kode acuan; tidak ada yang perlu diubah.'; exit 0; }

@@ -42,7 +42,9 @@ function xmlValid(string $xml): bool {
 }
 
 $hasil = ['ubah' => [], 'lewati' => []];
-$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($ROOT, FilesystemIterator::SKIP_DOTS));
+// CATCH_GET_CHILD: folder yang tidak bisa dibaca (mis. reports/output/lock) dilewati, bukan menghentikan skrip.
+$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($ROOT, FilesystemIterator::SKIP_DOTS),
+    RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::CATCH_GET_CHILD);
 $files = [];
 foreach ($it as $f) {
     if ($f->isFile() && preg_match('~^' . preg_quote($KODE, '~') . '-.*\.jrxml$~', $f->getFilename())) { $files[] = $f->getPathname(); }
