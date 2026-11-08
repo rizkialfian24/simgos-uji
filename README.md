@@ -70,3 +70,22 @@ sudo bash template-qr/kembalikan-qr.sh /var/backups/simgos-qr/<waktu>
 Diuji di vbox pada salinan: 56 template diubah, kasus tidak aman dilewati, ulang = 0 perubahan, pembatalan
 mengembalikan sha256 persis, dan ke-56 hasil terkompilasi JasperReports 6.19.1. Sesudahnya daftarkan ulang template
 KlaimTTE yang berubah (`daftar-template.php --cek`).
+
+## QR TTE bawaan berisi teks petunjuk verifikasi (tanpa data pasien)
+
+```bash
+sudo bash template-qr/qr-teks.sh --cek     # rencana
+sudo bash template-qr/qr-teks.sh           # terapkan (YA); cadangan: /var/backups/simgos-qr/teks-<waktu>
+sudo bash template-qr/qr-teks.sh --teks "Baris 1|Baris 2|https://..."   # ganti teks (| = baris baru)
+sudo bash template-qr/kembalikan-qr.sh /var/backups/simgos-qr/teks-<waktu>
+```
+Isi QR bawaan alat ini:
+```
+ID : <kode dokumen>
+Dokumen ini ditandatangani secara elektronik.
+Silakan cek keaslian berkas PDF di:
+https://tte.komdigi.go.id/verifyPDF
+```
+Mengubah hanya ekspresi QR TTE (QR berisi kode dokumen / INFO_DOC) di template RS; QR lain (NOPEN, perawat, dll.)
+tidak disentuh; database tidak dibaca/diubah. Diuji di vbox pada salinan: 62 diubah, 11 QR lain utuh, idempoten,
+teks bisa diganti, teks berbahaya ditolak, 62 terkompilasi JasperReports 6.19.1, pembatalan sha256 persis.
