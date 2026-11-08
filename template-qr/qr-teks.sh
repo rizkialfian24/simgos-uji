@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================================================
-# simgos-uji — isi QR TTE bawaan (template RS) menjadi teks petunjuk verifikasi, tanpa data pasien.
+# simgos-uji — QR TTE bawaan (template RS): isi yang ada (ID + data dokumen) dipertahankan, teks petunjuk verifikasi ditambahkan.
 #
 #   sudo bash template-qr/qr-teks.sh --cek          tampilkan rencana (tidak mengubah apa pun)
 #   sudo bash template-qr/qr-teks.sh                terapkan (ketik YA); cadangan + manifest dibuat dulu

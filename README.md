@@ -71,7 +71,7 @@ Diuji di vbox pada salinan: 56 template diubah, kasus tidak aman dilewati, ulang
 mengembalikan sha256 persis, dan ke-56 hasil terkompilasi JasperReports 6.19.1. Sesudahnya daftarkan ulang template
 KlaimTTE yang berubah (`daftar-template.php --cek`).
 
-## QR TTE bawaan berisi teks petunjuk verifikasi (tanpa data pasien)
+## QR TTE bawaan: data dokumen (INFO_DOC) dipertahankan + teks petunjuk verifikasi PDF
 
 ```bash
 sudo bash template-qr/qr-teks.sh --cek     # rencana
@@ -79,13 +79,16 @@ sudo bash template-qr/qr-teks.sh           # terapkan (YA); cadangan: /var/backu
 sudo bash template-qr/qr-teks.sh --teks "Baris 1|Baris 2|https://..."   # ganti teks (| = baris baru)
 sudo bash template-qr/kembalikan-qr.sh /var/backups/simgos-qr/teks-<waktu>
 ```
-Isi QR bawaan alat ini:
+Isi QR (template ber-INFO_DOC; template tanpa INFO_DOC: ID + teks saja; INFO_DOC kosong -> barisnya dilewati):
 ```
 ID : <kode dokumen>
+NAMA INSTANSI : … NAMA PASIEN : … NO. RM : … NOPEN : … NAMA DOKUMEN : … TANGGAL TTD : … TTD OLEH : …
+Silahkan konfirmasi keabsahan dokumen ke Instansi dengan ID diatas
 Dokumen ini ditandatangani secara elektronik.
 Silakan cek keaslian berkas PDF di:
 https://tte.komdigi.go.id/verifyPDF
 ```
-Mengubah hanya ekspresi QR TTE (QR berisi kode dokumen / INFO_DOC) di template RS; QR lain (NOPEN, perawat, dll.)
-tidak disentuh; database tidak dibaca/diubah. Diuji di vbox pada salinan: 62 diubah, 11 QR lain utuh, idempoten,
-teks bisa diganti, teks berbahaya ditolak, 62 terkompilasi JasperReports 6.19.1, pembatalan sha256 persis.
+Mengubah hanya ekspresi QR TTE di template RS (dikenali dari susunannya, tanpa penanda komentar); QR lain tidak
+disentuh; database tidak dibaca/diubah. Diuji di vbox pada salinan: 62 diubah, idempoten, teks bisa diganti,
+62 terkompilasi JasperReports 6.19.1, hasil isi teks QR diverifikasi lewat fill Jasper (INFO_DOC ada/kosong),
+pembatalan dua tahap kembali persis.
