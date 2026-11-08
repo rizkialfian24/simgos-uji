@@ -19,6 +19,7 @@ echo "dev $(hostname) $(date +%F)" | sudo tee /etc/simgos-dev
 | Folder | Isi |
 |---|---|
 | `kunjungan/` | pembuat & pembatal 5 kunjungan uji KlaimTTE |
+| `template-qr/` | QR TTE bawaan pada template RS berisi teks INFO_DOC (seperti template acuan SIMGOS) |
 | `skrip/` | penjaga server dev, pemeriksa rahasia, hook pre-commit |
 
 ## 5 kunjungan uji KlaimTTE
@@ -51,3 +52,21 @@ Ruangan & dokter: pilihan di vbox dipakai bila valid; di server lain dipilih **o
 Pilihan dicetak di awal (`pilihan`/`otomatis`). Lihat pilihan otomatis di vbox: `KT_ABAIKAN_PILIHAN=1 bash kunjungan/buat-kunjungan-uji.sh --cek`.
 Koneksi: `~/.my.cnf` bila ada, selain itu `-u akun` + password. Rincian hasil: `hasil/` (tidak masuk Git).
 Belum diisi: resume medis (banyak tabel turunan) — dokumen resume belum muncul untuk pasien uji.
+
+## QR TTE bawaan berisi INFO_DOC pada template RS
+
+SIMGOS memilih template `<KODE PPK instansi>-<nama>.jrxml`. Template acuan SIMGOS (`7371325-*`) sudah memakai QR
+`"ID : " + REQUEST_REPORT_ID + "\n" + INFO_DOC` (kolom INFO_DOC dari prosedur cetak bawaan). Template RS (`1306015-*`)
+di server dev baru masih QR "hanya kode". Skrip ini menyamakan HANYA 2 hal per berkas: deklarasi field INFO_DOC (bagian
+utama, bukan subDataset) dan ekspresi QR. Syarat per berkas: berkas biasa, QR persis `$P{REQUEST_REPORT_ID}`, prosedur
+query UTAMA mengeluarkan INFO_DOC, template acuan memakai prosedur & QR INFO_DOC yang sama, hasil XML valid.
+Database tidak diubah (hanya dibaca).
+
+```bash
+sudo bash template-qr/qr-info-doc.sh --cek        # rencana (tidak mengubah)
+sudo bash template-qr/qr-info-doc.sh              # terapkan (YA); cadangan: /var/backups/simgos-qr/<waktu>
+sudo bash template-qr/kembalikan-qr.sh /var/backups/simgos-qr/<waktu>
+```
+Diuji di vbox pada salinan: 56 template diubah, kasus tidak aman dilewati, ulang = 0 perubahan, pembatalan
+mengembalikan sha256 persis, dan ke-56 hasil terkompilasi JasperReports 6.19.1. Sesudahnya daftarkan ulang template
+KlaimTTE yang berubah (`daftar-template.php --cek`).
