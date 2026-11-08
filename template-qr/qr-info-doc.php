@@ -66,6 +66,14 @@ foreach ($files as $path) {
         $xa = (string) file_get_contents($acuan);
         if (prosedur($xa) !== $proc) { $alasan = 'template acuan memanggil prosedur lain (' . (prosedur($xa) ?? '-') . ')'; }
         elseif (!preg_match(QR_INFO, $xa) || fieldInfoDoc($xa) === null) { $alasan = 'template acuan tidak memakai QR INFO_DOC'; }
+        else {
+            // Setiap QR yang diganti harus punya padanan QR INFO_DOC di acuan (template ber-QR banyak: jumlah harus sama).
+            $rsAll = preg_match_all('~<jr:QRCode\b~', $xml); $rsId = preg_match_all(QR_LAMA, $xml);
+            $acAll = preg_match_all('~<jr:QRCode\b~', $xa);  $acInfo = preg_match_all(QR_INFO, $xa);
+            if ($rsAll !== $acAll || $rsId !== $acInfo) {
+                $alasan = "jumlah QR berbeda dengan acuan (RS: $rsId dari $rsAll hanya-kode, acuan: $acInfo dari $acAll INFO_DOC)";
+            }
+        }
     }
     if ($alasan !== null) { $hasil['lewati'][] = [$rel, $alasan]; continue; }
 
