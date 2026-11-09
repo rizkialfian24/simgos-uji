@@ -32,6 +32,6 @@ siapkan_koneksi() {
 jalankan_php() {   # $1 mode, $2 oleh, $3 berkas hasil, $4 pakai tempat tidur (0/1), $5 set ('' = pasien 1-5, 'status' = 6-10)
   printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$DSN" "$DBUSER" "$DBPASS" "${4:-0}" "${5:-}" | php -r '
     [$m,$o,$h,$d,$u,$p,$t,$s] = array_pad(explode("\0", stream_get_contents(STDIN)), 8, "");
-    echo json_encode(["mode"=>$m,"oleh"=>$o,"hasil"=>$h,"dsn"=>$d,"user"=>$u,"pass"=>$p,"tempat_tidur"=>$t==="1","set"=>$s]);' \
+    echo json_encode(["mode"=>$m,"oleh"=>$o,"hasil"=>$h,"dsn"=>$d,"user"=>$u,"pass"=>$p,"tempat_tidur"=>$t==="1","set"=>$s,"pasien"=>getenv("KT_PASIEN") ?: "6-10"]);' \
   | php -d display_errors=stderr "$HERE/kunjungan-uji.php"
 }

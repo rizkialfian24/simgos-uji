@@ -110,6 +110,67 @@ if ($MODE === 'batal' || $MODE === 'batal-cek') {
     exit(0);
 }
 
+/** Status yang akan tampil di KlaimTTE (aturan sama dengan RegistrationReadService::withServiceStatus). */
+function statusKlaimtte(string $nopen): string {
+    $k = q("SELECT k.STATUS, k.FINAL_HASIL, r.JENIS_KUNJUNGAN FROM pendaftaran.kunjungan k JOIN master.ruangan r ON r.ID = k.RUANGAN
+        WHERE k.NOPEN = ? AND k.STATUS != 0", [$nopen])->fetchAll();
+    if (array_filter($k, fn($x) => (int) $x['STATUS'] === 1)) { return 'MASIH DILAYANI'; }
+    if (array_filter($k, fn($x) => in_array((int) $x['JENIS_KUNJUNGAN'], [1, 2, 3], true) && (int) $x['FINAL_HASIL'] !== 1)) { return 'RM BELUM FINAL'; }
+    $t = q("SELECT MIN(t.STATUS) FROM pembayaran.tagihan_pendaftaran tp JOIN pembayaran.tagihan t ON t.ID = tp.TAGIHAN
+        WHERE tp.PENDAFTARAN = ? AND tp.STATUS <> 0 AND t.STATUS <> 0", [$nopen])->fetchColumn();
+    if ($t === null || $t === false) { return 'BELUM ADA TAGIHAN'; }
+    if ((int) $t < 2) { return 'TAGIHAN BELUM FINAL'; }
+    return 'FINAL + ' . ((int) satu("SELECT STATUS FROM berkas_klaim.kelengkapan WHERE NOPEN = ?", [$nopen]) === 2 ? 'BERKAS LENGKAP' : 'BERKAS BELUM LENGKAP');
+}
+
+// =====================================================================================================  FINALKAN (acc semua)
+// Pasien uji nomor tertentu (bawaan 6-10): kunjungan aktif diselesaikan, Final RM, tagihan dikunci & final, kelengkapan Lengkap.
+// Kolom yang sama dengan tombol SIMGOS; trigger ikut berjalan. Kunjungan rawat inap aktif TIDAK diselesaikan (perlu Pasien Pulang).
+if ($MODE === 'final' || $MODE === 'final-cek') {
+    if (!preg_match('/^(\d{1,2})(?:-(\d{1,2}))?$/', (string) ($cfg['pasien'] ?? '6-10'), $m)) { berhenti('format --pasien: 6-10 atau 7'); }
+    $nomor = range((int) $m[1], (int) ($m[2] ?? $m[1]));
+    $db->beginTransaction();
+    try {
+        $TABEL_MASTER = tabelMaster(); $sidikAwal = sidikMaster($TABEL_MASTER);
+        $n = 0;
+        foreach ($nomor as $i) {
+            $nama = PENANDA . " $i";
+            $rows = q("SELECT pd.NOMOR FROM master.pasien p JOIN master.kartu_identitas_pasien k ON k.NORM = p.NORM AND k.JENIS = 1 AND k.NOMOR = ?
+                JOIN pendaftaran.pendaftaran pd ON pd.NORM = p.NORM AND pd.STATUS != 0 WHERE p.NAMA = ? AND p.STATUS = 1 ORDER BY pd.NOMOR",
+                [sprintf('9999%012d', $i), $nama])->fetchAll(PDO::FETCH_COLUMN);
+            if (!$rows) { info("  $nama: tidak ada pendaftaran aktif, dilewati"); continue; }
+            foreach ($rows as $nopen) {
+                $ri = (int) satu("SELECT COUNT(*) FROM pendaftaran.kunjungan k JOIN master.ruangan r ON r.ID = k.RUANGAN WHERE k.NOPEN = ? AND k.STATUS = 1 AND r.JENIS_KUNJUNGAN = 3", [$nopen]);
+                if ($ri > 0) { info("  $nama NOPEN $nopen: masih rawat inap, dilewati (pulangkan lewat menu Pasien Pulang)"); continue; }
+                $dpjp = (int) satu("SELECT u.ID FROM pendaftaran.kunjungan k JOIN master.dokter d ON d.ID = k.DPJP JOIN aplikasi.pengguna u ON u.NIP = d.NIP AND u.STATUS = 1
+                    WHERE k.NOPEN = ? AND k.STATUS != 0 ORDER BY k.MASUK LIMIT 1", [$nopen]) ?: $OLEH;
+                q("UPDATE pendaftaran.kunjungan SET KELUAR = NOW(), STATUS = 2 WHERE NOPEN = ? AND STATUS = 1", [$nopen]);
+                q("UPDATE pendaftaran.kunjungan SET FINAL_HASIL = 1, FINAL_HASIL_OLEH = ?, FINAL_HASIL_TANGGAL = NOW() WHERE NOPEN = ? AND STATUS = 2 AND FINAL_HASIL != 1", [$dpjp, $nopen]);
+                $tg = q("SELECT TAGIHAN FROM pembayaran.tagihan_pendaftaran WHERE PENDAFTARAN = ? AND STATUS = 1", [$nopen])->fetchAll(PDO::FETCH_COLUMN);
+                if (!$tg) { throw new RuntimeException("tagihan $nopen tidak ada"); }
+                foreach ($tg as $t) {
+                    q("UPDATE pembayaran.tagihan SET KUNCI = 1, OLEH = ? WHERE ID = ? AND KUNCI = 0", [$OLEH, $t]);
+                    q("UPDATE pembayaran.tagihan SET STATUS = 2, OLEH = ? WHERE ID = ? AND STATUS = 1", [$OLEH, $t]);
+                }
+                q("UPDATE berkas_klaim.kelengkapan SET STATUS = 2 WHERE NOPEN = ?", [$nopen]);
+                $st = statusKlaimtte($nopen);
+                if ($st !== 'FINAL + BERKAS LENGKAP') { throw new RuntimeException("$nama NOPEN $nopen: status jadi '$st'"); }
+                info(sprintf('  %-16s NOPEN %s  -> %s', $nama, $nopen, $st));
+                $n++;
+            }
+        }
+        $berubah = array_keys(array_diff_assoc(sidikMaster($TABEL_MASTER), $sidikAwal));
+        if ($berubah) { throw new RuntimeException('data master berubah (' . implode(', ', $berubah) . ')'); }
+        info('  data master: ' . count($TABEL_MASTER) . ' tabel diperiksa, tidak ada yang berubah');
+        if ($MODE === 'final-cek') { $db->rollBack(); info("MODE CEK: $n pendaftaran akan jadi FINAL + BERKAS LENGKAP; tidak ada yang diubah (ROLLBACK)."); }
+        else { $db->commit(); info("Selesai: $n pendaftaran uji FINAL + BERKAS LENGKAP. Muat ulang daftar KlaimTTE."); }
+    } catch (Throwable $e) {
+        if ($db->inTransaction()) { $db->rollBack(); }
+        berhenti('gagal, semua dikembalikan (ROLLBACK): ' . $e->getMessage());
+    }
+    exit(0);
+}
+
 // =====================================================================================================  RUANGAN & DOKTER
 // Dokter "siap": aktif, tepat satu akun SIMGOS aktif ber-NIP sama, NIP tunggal di master.pegawai, tepat satu NIK KTP
 // 16 digit di pegawai.kartu_identitas (syarat penanda tangan KlaimTTE), punya SMF, terdaftar aktif di ruangan itu.
@@ -180,19 +241,6 @@ function sidikMaster(array $tabel): array {
         $out[$t] = implode(':', q("SELECT COUNT(*), IFNULL(BIT_XOR(CRC32(CONCAT_WS('|', $expr))),0) FROM master.`" . str_replace('`', '', $t) . "`")->fetch(PDO::FETCH_NUM));
     }
     return $out;
-}
-
-/** Status yang akan tampil di KlaimTTE (aturan sama dengan RegistrationReadService::withServiceStatus). */
-function statusKlaimtte(string $nopen): string {
-    $k = q("SELECT k.STATUS, k.FINAL_HASIL, r.JENIS_KUNJUNGAN FROM pendaftaran.kunjungan k JOIN master.ruangan r ON r.ID = k.RUANGAN
-        WHERE k.NOPEN = ? AND k.STATUS != 0", [$nopen])->fetchAll();
-    if (array_filter($k, fn($x) => (int) $x['STATUS'] === 1)) { return 'MASIH DILAYANI'; }
-    if (array_filter($k, fn($x) => in_array((int) $x['JENIS_KUNJUNGAN'], [1, 2, 3], true) && (int) $x['FINAL_HASIL'] !== 1)) { return 'RM BELUM FINAL'; }
-    $t = q("SELECT MIN(t.STATUS) FROM pembayaran.tagihan_pendaftaran tp JOIN pembayaran.tagihan t ON t.ID = tp.TAGIHAN
-        WHERE tp.PENDAFTARAN = ? AND tp.STATUS <> 0 AND t.STATUS <> 0", [$nopen])->fetchColumn();
-    if ($t === null || $t === false) { return 'BELUM ADA TAGIHAN'; }
-    if ((int) $t < 2) { return 'TAGIHAN BELUM FINAL'; }
-    return 'FINAL + ' . ((int) satu("SELECT STATUS FROM berkas_klaim.kelengkapan WHERE NOPEN = ?", [$nopen]) === 2 ? 'BERKAS LENGKAP' : 'BERKAS BELUM LENGKAP');
 }
 
 // =====================================================================================================  BUAT

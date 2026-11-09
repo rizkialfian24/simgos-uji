@@ -58,6 +58,16 @@ Status tiap pasien diperiksa di akhir dengan aturan yang sama dengan KlaimTTE; b
 Final tagihan **tanpa** transaksi kasir (`pembayaran_tagihan`); trigger SIMGOS tetap berjalan (antrean hitung distribusi
 tarif, outbox `TAGIHAN_FINAL`, pendaftaran final). Pembatalan: `batalkan-kunjungan-uji.sh` (tagihan final tetap tercatat).
 
+### Jadikan pasien uji "acc semua" (FINAL + BERKAS LENGKAP)
+
+```bash
+bash kunjungan/finalkan-kunjungan-uji.sh --cek           # pasien 6-10, coba lalu ROLLBACK
+bash kunjungan/finalkan-kunjungan-uji.sh                 # terapkan (ketik YA)
+bash kunjungan/finalkan-kunjungan-uji.sh --pasien 1-4    # nomor lain
+```
+Kunjungan aktif diselesaikan, Final RM, tagihan dikunci & final, kelengkapan Berkas Klaim = Lengkap. Rawat inap yang
+masih dirawat dilewati (pulangkan lewat menu Pasien Pulang). Status diperiksa dan data master dijaga seperti di atas.
+
 **Hanya menambah pasien & kunjungan.** Ruangan, tarif, dokter, tempat tidur: memakai yang sudah ada dan TIDAK diubah.
 Pengaman: sidik jari 17 tabel master (ruangan, kamar, tempat tidur, dokter, SMF, pegawai, perawat, referensi, paket, ppk,
 semua `tarif*`) dihitung sebelum & sesudah di dalam transaksi; bila ada yang berubah (termasuk oleh trigger) semuanya
