@@ -16,6 +16,7 @@ if (!is_array($cfg)) { fwrite(STDERR, "konfigurasi tidak valid\n"); exit(2); }
 $MODE = $cfg['mode'];                         // cek | buat | batal-cek | batal
 $PAKAI_TT = !empty($cfg['tempat_tidur']);     // bawaan: rawat inap TANPA tempat tidur (status master.ruang_kamar_tidur tidak disentuh)
 $HASIL = $cfg['hasil'] ?? '';
+$SET_STATUS = ($cfg['set'] ?? '') === 'status';   // --status: pasien 6-10, satu pasien per status berkas KlaimTTE
 
 function berhenti(string $m, int $kode = 1): never { fwrite(STDERR, "BERHENTI: $m\n"); exit($kode); }
 function info(string $m): void { echo $m, "\n"; }
@@ -36,6 +37,25 @@ $RENCANA = [
           'ri_cari' => ['Penyakit Dalam', 'Interna', 'Dalam'], 'ri_pilih' => ['101030401', 18],
           'keluhan' => 'Sesak napas dan batuk berdahak sejak 4 hari', 'rps' => 'Demam tinggi, sesak bertambah, saturasi turun'],
 ];
+// --status: pasien 6-10. 'akhir' = keadaan akhir yang dibuat (lewat kolom/trigger yang sama dengan tombol SIMGOS):
+//   dilayani : kunjungan dibiarkan aktif                                  -> MASIH DILAYANI
+//   rm       : kunjungan selesai, RM belum Final                          -> RM BELUM FINAL
+//   tagihan  : + Final RM (Detail Kunjungan)                              -> TAGIHAN BELUM FINAL
+//   berkas   : + tagihan dikunci & difinalkan (Kasir)                     -> FINAL + BERKAS BELUM LENGKAP
+//   lengkap  : + kelengkapan Berkas Klaim = Lengkap                       -> FINAL + BERKAS LENGKAP
+$RENCANA_STATUS = [
+    6  => ['jk' => 2, 'lahir' => '1972-03-08', 'jenis' => 'rj', 'cari' => ['Penyakit Dalam', 'Interna', 'Dalam'], 'pilih' => ['101010106', 18], 'kelas' => 3, 'icd' => 'E11.9', 'akhir' => 'dilayani',
+           'keluhan' => 'Sering haus dan buang air kecil malam hari', 'rps' => 'Gula darah sewaktu tinggi, berat badan turun 1 bulan'],
+    7  => ['jk' => 1, 'lahir' => '1964-11-19', 'jenis' => 'rj', 'cari' => ['Bedah Umum', 'Bedah'], 'pilih' => ['101010102', 22], 'kelas' => 3, 'icd' => 'K40.9', 'akhir' => 'rm',
+           'keluhan' => 'Benjolan di lipat paha kanan', 'rps' => 'Benjolan hilang timbul saat mengejan sejak 6 bulan'],
+    8  => ['jk' => 2, 'lahir' => '2017-06-14', 'jenis' => 'rj', 'cari' => ['Anak'], 'pilih' => ['101010101', 27], 'kelas' => 3, 'icd' => 'J20.9', 'akhir' => 'tagihan',
+           'keluhan' => 'Batuk berdahak 5 hari', 'rps' => 'Batuk makin sering malam hari, demam ringan'],
+    9  => ['jk' => 1, 'lahir' => '1979-01-25', 'jenis' => 'igd', 'cari' => ['IGD', 'Gawat Darurat', 'Darurat'], 'pilih' => ['101020201', 9], 'kelas' => 3, 'icd' => 'K29.7', 'akhir' => 'berkas',
+           'keluhan' => 'Nyeri ulu hati dan mual sejak semalam', 'rps' => 'Telat makan, riwayat sakit maag'],
+    10 => ['jk' => 2, 'lahir' => '1960-05-02', 'jenis' => 'rj', 'cari' => ['Penyakit Dalam', 'Interna', 'Dalam'], 'pilih' => ['101010106', 18], 'kelas' => 3, 'icd' => 'I10', 'akhir' => 'lengkap',
+           'keluhan' => 'Kontrol tekanan darah', 'rps' => 'Obat rutin habis, tidak ada keluhan berat'],
+];
+if ($SET_STATUS) { $RENCANA = $RENCANA_STATUS; }
 const JK_RUANGAN = ['rj' => 1, 'igd' => 2, 'ri' => 3];
 
 // ---------------------------------------------------------------- koneksi
@@ -162,6 +182,19 @@ function sidikMaster(array $tabel): array {
     return $out;
 }
 
+/** Status yang akan tampil di KlaimTTE (aturan sama dengan RegistrationReadService::withServiceStatus). */
+function statusKlaimtte(string $nopen): string {
+    $k = q("SELECT k.STATUS, k.FINAL_HASIL, r.JENIS_KUNJUNGAN FROM pendaftaran.kunjungan k JOIN master.ruangan r ON r.ID = k.RUANGAN
+        WHERE k.NOPEN = ? AND k.STATUS != 0", [$nopen])->fetchAll();
+    if (array_filter($k, fn($x) => (int) $x['STATUS'] === 1)) { return 'MASIH DILAYANI'; }
+    if (array_filter($k, fn($x) => in_array((int) $x['JENIS_KUNJUNGAN'], [1, 2, 3], true) && (int) $x['FINAL_HASIL'] !== 1)) { return 'RM BELUM FINAL'; }
+    $t = q("SELECT MIN(t.STATUS) FROM pembayaran.tagihan_pendaftaran tp JOIN pembayaran.tagihan t ON t.ID = tp.TAGIHAN
+        WHERE tp.PENDAFTARAN = ? AND tp.STATUS <> 0 AND t.STATUS <> 0", [$nopen])->fetchColumn();
+    if ($t === null || $t === false) { return 'BELUM ADA TAGIHAN'; }
+    if ((int) $t < 2) { return 'TAGIHAN BELUM FINAL'; }
+    return 'FINAL + ' . ((int) satu("SELECT STATUS FROM berkas_klaim.kelengkapan WHERE NOPEN = ?", [$nopen]) === 2 ? 'BERKAS LENGKAP' : 'BERKAS BELUM LENGKAP');
+}
+
 // =====================================================================================================  BUAT
 $ringkasan = [];
 $db->beginTransaction();
@@ -250,8 +283,34 @@ try {
                     . var_export($v['igd_keluar'], true) . ', mutasi=' . $v['mutasi_st'] . ')');
             }
             $baris['status'] = 'masih dirawat';
+        } elseif (($r['akhir'] ?? '') === 'dilayani') {
+            $baris['status'] = 'masih dilayani';                 // kunjungan tetap aktif (STATUS 1)
         } else {
             q("UPDATE pendaftaran.kunjungan SET KELUAR = ?, STATUS = 2 WHERE NOMOR = ?", [$tgl($mulai - 55), $kunjPertama]);
+        }
+
+        // ---- --status: Final RM, final tagihan, kelengkapan berkas (kolom yang sama dengan tombol SIMGOS; trigger ikut berjalan)
+        $akhir = $r['akhir'] ?? '';
+        if (in_array($akhir, ['tagihan', 'berkas', 'lengkap'], true)) {
+            // Detail Kunjungan -> Final (KunjunganResource: FINAL_HASIL, FINAL_HASIL_OLEH, FINAL_HASIL_TANGGAL)
+            q("UPDATE pendaftaran.kunjungan SET FINAL_HASIL = 1, FINAL_HASIL_OLEH = ?, FINAL_HASIL_TANGGAL = ? WHERE NOPEN = ? AND STATUS = 2",
+              [$du, $tgl($mulai - 50), $nopen]);
+        }
+        if (in_array($akhir, ['berkas', 'lengkap'], true)) {
+            // Kasir: kunci tagihan lalu finalkan (TagihanResource: KUNCI = 1, lalu STATUS = 2). Trigger onAfterUpdateTagihan
+            // mengantrekan hitung distribusi tarif dan menandai pendaftaran final, seperti dari aplikasi.
+            $tg = q("SELECT TAGIHAN FROM pembayaran.tagihan_pendaftaran WHERE PENDAFTARAN = ? AND STATUS = 1", [$nopen])->fetchAll(PDO::FETCH_COLUMN);
+            if (!$tg) { throw new RuntimeException("tagihan $nopen tidak terbentuk; tidak bisa difinalkan"); }
+            foreach ($tg as $t) {
+                q("UPDATE pembayaran.tagihan SET KUNCI = 1, OLEH = ? WHERE ID = ? AND KUNCI = 0", [$OLEH, $t]);
+                q("UPDATE pembayaran.tagihan SET STATUS = 2, OLEH = ? WHERE ID = ? AND STATUS = 1", [$OLEH, $t]);
+            }
+        }
+        if ($akhir === 'lengkap') {
+            // Berkas Klaim -> Kelengkapan: Lengkap (berkas_klaim.kelengkapan.STATUS 2)
+            if (q("UPDATE berkas_klaim.kelengkapan SET STATUS = 2 WHERE NOPEN = ?", [$nopen])->rowCount() !== 1) {
+                throw new RuntimeException("kelengkapan berkas klaim $nopen tidak ada; tidak bisa ditandai lengkap");
+            }
         }
 
         // ---- verifikasi hasil trigger
@@ -261,6 +320,13 @@ try {
         if ((int) $cek['kunjungan'] !== count($baris['kunjungan'])) { throw new RuntimeException("jumlah kunjungan $nopen tidak sesuai"); }
         $baris['tagihan'] = (int) $cek['tagihan'] > 0 ? 'ya' : 'TIDAK';
         $baris['kelengkapan_klaim'] = (int) $cek['klaim'] > 0 ? 'ya' : 'TIDAK';
+        if ($akhir !== '') {
+            $baris['status_klaimtte'] = statusKlaimtte($nopen);
+            $harap = ['dilayani' => 'MASIH DILAYANI', 'rm' => 'RM BELUM FINAL', 'tagihan' => 'TAGIHAN BELUM FINAL',
+                      'berkas' => 'FINAL + BERKAS BELUM LENGKAP', 'lengkap' => 'FINAL + BERKAS LENGKAP'][$akhir];
+            if ($baris['status_klaimtte'] !== $harap) { throw new RuntimeException("pasien $i: status jadi '{$baris['status_klaimtte']}', seharusnya '$harap'"); }
+            $baris['status'] = $baris['status_klaimtte'];
+        }
         $ringkasan[] = $baris;
     }
 
@@ -278,11 +344,11 @@ try {
 
 // ---------------------------------------------------------------- laporan
 info('');
-info(sprintf('%-3s %-15s %-8s %-12s %-19s %-19s %-10s %s', 'No', 'Pasien', 'NORM', 'NOPEN', 'SEP (dummy)', 'Kunjungan', 'Status', 'Ruangan / DPJP / ICD'));
+info(sprintf('%-3s %-16s %-8s %-12s %-19s %-19s %-28s %s', 'No', 'Pasien', 'NORM', 'NOPEN', 'SEP (dummy)', 'Kunjungan', 'Status', 'Ruangan / DPJP / ICD'));
 foreach ($ringkasan as $b) {
-    info(sprintf('%-3s %-15s %-8s %-12s %-19s %-19s %-10s %s', $b['no'], $b['nama'], $b['norm'], $b['nopen'], $b['sep'], $b['kunjungan'][0], $b['status'],
+    info(sprintf('%-3s %-16s %-8s %-12s %-19s %-19s %-28s %s', $b['no'], $b['nama'], $b['norm'], $b['nopen'], $b['sep'], $b['kunjungan'][0], $b['status'],
         $b['ruangan'] . ' / ' . $b['dpjp'] . ' / ' . $b['icd']));
-    for ($k = 1; $k < count($b['kunjungan']); $k++) { info(sprintf('%-63s %-19s', '', $b['kunjungan'][$k])); }
+    for ($k = 1; $k < count($b['kunjungan']); $k++) { info(sprintf('%-64s %-19s', '', $b['kunjungan'][$k])); }
 }
 info('');
 info('Tagihan terbentuk (trigger): ' . implode(' ', array_column($ringkasan, 'tagihan')) . '   kelengkapan berkas klaim: ' . implode(' ', array_column($ringkasan, 'kelengkapan_klaim')));

@@ -29,9 +29,9 @@ siapkan_koneksi() {
   DSN="mysql:host=127.0.0.1;charset=utf8mb4"
 }
 # JSON aman untuk STDIN php (nilai di-escape oleh php sendiri).
-jalankan_php() {   # $1 mode, $2 oleh, $3 berkas hasil, $4 pakai tempat tidur (0/1)
-  printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$DSN" "$DBUSER" "$DBPASS" "${4:-0}" | php -r '
-    [$m,$o,$h,$d,$u,$p,$t] = array_pad(explode("\0", stream_get_contents(STDIN)), 7, "");
-    echo json_encode(["mode"=>$m,"oleh"=>$o,"hasil"=>$h,"dsn"=>$d,"user"=>$u,"pass"=>$p,"tempat_tidur"=>$t==="1"]);' \
+jalankan_php() {   # $1 mode, $2 oleh, $3 berkas hasil, $4 pakai tempat tidur (0/1), $5 set ('' = pasien 1-5, 'status' = 6-10)
+  printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "$DSN" "$DBUSER" "$DBPASS" "${4:-0}" "${5:-}" | php -r '
+    [$m,$o,$h,$d,$u,$p,$t,$s] = array_pad(explode("\0", stream_get_contents(STDIN)), 8, "");
+    echo json_encode(["mode"=>$m,"oleh"=>$o,"hasil"=>$h,"dsn"=>$d,"user"=>$u,"pass"=>$p,"tempat_tidur"=>$t==="1","set"=>$s]);' \
   | php -d display_errors=stderr "$HERE/kunjungan-uji.php"
 }

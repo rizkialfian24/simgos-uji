@@ -39,6 +39,25 @@ bash kunjungan/batalkan-kunjungan-uji.sh      # batalkan semua pendaftaran pasie
 | 4 | IGD | IGD | dokter037 | A09 |
 | 5 | IGD → rawat inap (masih dirawat, tanpa tempat tidur) | IGD → RI Penyakit Dalam Kelas III | dokter037 → dokter011 | J18.9 |
 
+### Pasien 6–10: satu pasien per status berkas KlaimTTE (`--status`)
+
+```bash
+bash kunjungan/buat-kunjungan-uji.sh --status --cek   # coba lalu ROLLBACK
+bash kunjungan/buat-kunjungan-uji.sh --status         # buat sungguhan (ketik YA)
+```
+
+| No | Jenis | Status di KlaimTTE | Yang dikerjakan skrip (kolom yang sama dengan tombol SIMGOS) |
+|---|---|---|---|
+| 6 | RJ Penyakit Dalam (E11.9) | MASIH DILAYANI | kunjungan dibiarkan aktif |
+| 7 | RJ Bedah (K40.9) | RM BELUM FINAL | kunjungan selesai, RM belum Final |
+| 8 | RJ Anak (J20.9) | TAGIHAN BELUM FINAL | + Final RM (`kunjungan.FINAL_HASIL`) |
+| 9 | IGD (K29.7) | ✓ FINAL + BERKAS BELUM LENGKAP | + tagihan dikunci & difinalkan (`tagihan.KUNCI`, `STATUS = 2`) |
+| 10 | RJ Penyakit Dalam (I10) | ✓ FINAL + ✓ BERKAS LENGKAP | + kelengkapan Berkas Klaim `STATUS = 2` |
+
+Status tiap pasien diperiksa di akhir dengan aturan yang sama dengan KlaimTTE; bila tidak sesuai, semuanya di-ROLLBACK.
+Final tagihan **tanpa** transaksi kasir (`pembayaran_tagihan`); trigger SIMGOS tetap berjalan (antrean hitung distribusi
+tarif, outbox `TAGIHAN_FINAL`, pendaftaran final). Pembatalan: `batalkan-kunjungan-uji.sh` (tagihan final tetap tercatat).
+
 **Hanya menambah pasien & kunjungan.** Ruangan, tarif, dokter, tempat tidur: memakai yang sudah ada dan TIDAK diubah.
 Pengaman: sidik jari 17 tabel master (ruangan, kamar, tempat tidur, dokter, SMF, pegawai, perawat, referensi, paket, ppk,
 semua `tarif*`) dihitung sebelum & sesudah di dalam transaksi; bila ada yang berubah (termasuk oleh trigger) semuanya
