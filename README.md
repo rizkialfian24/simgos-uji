@@ -68,6 +68,16 @@ bash kunjungan/finalkan-kunjungan-uji.sh --pasien 1-4    # nomor lain
 Kunjungan aktif diselesaikan, Final RM, tagihan dikunci & final, kelengkapan Berkas Klaim = Lengkap. Rawat inap yang
 masih dirawat dilewati (pulangkan lewat menu Pasien Pulang). Status diperiksa dan data master dijaga seperti di atas.
 
+### Finalkan NOPEN tertentu (berkas mandiri, tanpa git)
+
+```bash
+bash kunjungan/finalkan-nopen.sh --cek 2611060006 2611060007   # coba, ROLLBACK
+bash kunjungan/finalkan-nopen.sh 2611060006 2611060007         # terapkan (ketik YA)
+```
+Satu berkas, bisa disalin sendiri ke server (scp). Rawat inap aktif dipulangkan lewat `layanan.pasien_pulang`
+(Diijinkan Pulang, Membaik); tempat tidur pasien uji dikosongkan trigger SIMGOS (satu-satunya perubahan master yang
+diizinkan). NOPEN pasien bukan uji ditolak.
+
 **Hanya menambah pasien & kunjungan.** Ruangan, tarif, dokter, tempat tidur: memakai yang sudah ada dan TIDAK diubah.
 Pengaman: sidik jari 17 tabel master (ruangan, kamar, tempat tidur, dokter, SMF, pegawai, perawat, referensi, paket, ppk,
 semua `tarif*`) dihitung sebelum & sesudah di dalam transaksi; bila ada yang berubah (termasuk oleh trigger) semuanya
